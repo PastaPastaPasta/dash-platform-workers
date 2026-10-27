@@ -8,9 +8,9 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-dash-sdk = { git = "https://github.com/dashpay/platform", rev = "078a6596e406ef3c4f99d260619675971f2ad34c", default-features = false }
-rs-sdk-trusted-context-provider = { git = "https://github.com/dashpay/platform", rev = "078a6596e406ef3c4f99d260619675971f2ad34c" }
-simple-signer = { git = "https://github.com/dashpay/platform", rev = "078a6596e406ef3c4f99d260619675971f2ad34c", features = ["state-transitions"] }
+dash-sdk = { git = "https://github.com/dashpay/platform", rev = "045a4b1899fd92fdd4ed771d67eb7cd5ba74da4c", default-features = false }
+rs-sdk-trusted-context-provider = { git = "https://github.com/dashpay/platform", rev = "045a4b1899fd92fdd4ed771d67eb7cd5ba74da4c" }
+simple-signer = { git = "https://github.com/dashpay/platform", rev = "045a4b1899fd92fdd4ed771d67eb7cd5ba74da4c", features = ["state-transitions"] }
 wasm-bindgen = "=0.2.108"
 wasm-bindgen-futures = "0.4.58"
 getrandom = { version = "0.2", features = ["js"] }
