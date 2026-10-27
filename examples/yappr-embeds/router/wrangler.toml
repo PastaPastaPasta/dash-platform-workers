@@ -1,0 +1,18 @@
+name = "yappr-embeds"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+# On Yappr's zone: drop ORIGIN and add
+#   routes = [{ pattern = "yap.pr/post*", zone_name = "yap.pr" }, { pattern = "yap.pr/user*", zone_name = "yap.pr" }]
+# With ORIGIN set (as here, on workers.dev) it serves the live site from anywhere, for testing.
+# Set the route's failure mode to "fail open" so the site stays up if this Worker can't run.
+[vars]
+ORIGIN = "https://yap.pr"
+CANONICAL_ORIGIN = "https://yap.pr"
+
+[[services]]
+binding = "CARDS"
+service = "yappr-cards"
+
+[observability]
+enabled = true

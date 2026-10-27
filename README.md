@@ -97,5 +97,6 @@ npm test
   for any method. Try it locally with `npx wrangler dev`.
 - [`examples/yappr-embeds`](examples/yappr-embeds): rich link previews for
   [Yappr](https://yap.pr). Yappr is a static app, so Discord, Slack and X see a generic page for
-  every post. Routed in front of the site, this answers their crawlers with the post's author,
-  text and avatar read from Platform, and passes everyone else through untouched.
+  every post. A tiny `router` Worker in front of the site passes people through untouched and
+  answers crawlers with the post's author, text and avatar, which a `cards` Worker reads from
+  Platform behind a service binding. Deploy `cards` first.
