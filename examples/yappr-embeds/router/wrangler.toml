@@ -20,7 +20,9 @@ service = "yappr-cards"
 enabled = true
 
 # yappr.thepasta.org: the Cloudflare Pages mirror of yap.pr, on a zone in this account.
-# `wrangler deploy --env thepasta`
+# `wrangler deploy --env thepasta`. Wrangler can't set a route's failure mode: after deploying,
+# check both routes have `request_limit_fail_open: true` (dashboard or the zone routes API), so
+# going over the Free plan's daily request limit skips the Worker instead of failing the page.
 [env.thepasta]
 workers_dev = false
 routes = [
