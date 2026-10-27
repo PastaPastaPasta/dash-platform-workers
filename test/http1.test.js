@@ -103,3 +103,34 @@ test('should fail the body when a content-length body is cut off', async () => {
 test('should reject a response that is not HTTP/1.x', async () => {
   await assert.rejects(readResponse(socket(['SSH-2.0-OpenSSH\r\n\r\n'])), /malformed status line/);
 });
+
+test('should reject a negative chunk size instead of looping on it', async () => {
+  const res = await readResponse(socket(['HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n-6\r\nabcdef\r\n0\r\n\r\n']));
+  await assert.rejects(res.text(), /malformed chunk size/);
+});
+
+test('should accept chunk extensions after the size', async () => {
+  const res = await readResponse(socket(['HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n3;name=v\r\nabc\r\n0\r\n\r\n']));
+  assert.equal(await res.text(), 'abc');
+});
+
+test('should reject a chunk larger than the cap before buffering it', async () => {
+  const res = await readResponse(socket(['HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\nffffffff\r\n'], { hang: true }));
+  await assert.rejects(res.text(), /too large/);
+});
+
+test('should reject a malformed content-length', async () => {
+  await assert.rejects(readResponse(socket(['HTTP/1.1 200 OK\r\ncontent-length: 12abc\r\n\r\n'])), /malformed content-length/);
+});
+
+test('should reject a response head that never ends', async () => {
+  const filler = 'x-filler: ' + 'a'.repeat(1000) + '\r\n';
+  await assert.rejects(readResponse(socket(['HTTP/1.1 200 OK\r\n', ...Array(70).fill(filler)], { hang: true })), /too large/);
+});
+
+test('should count multi-byte header values in the framed length', () => {
+  const url = new URL('https://1.2.3.4/x');
+  const req = new Request(url, { method: 'POST', headers: { 'x-note': 'ünïcode' } });
+  const framed = encodeRequest(req, url, new Uint8Array([9, 9]));
+  assert.deepEqual([...framed.slice(-2)], [9, 9]);
+});

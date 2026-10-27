@@ -1009,9 +1009,12 @@ dependencies = [
 name = "dash-platform-workers"
 version = "0.1.0"
 dependencies = [
+ "bip37-bloom-filter",
  "dash-sdk",
+ "futures",
  "getrandom 0.2.17",
  "hex",
+ "js-sys",
  "rs-sdk-trusted-context-provider",
  "serde_json",
  "simple-signer",

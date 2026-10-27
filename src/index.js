@@ -8,33 +8,45 @@ import './ip-fetch.js';
 wasm.initSync({ module: wasmModule });
 
 const big = (v) => (v == null ? null : BigInt(v));
-const bigValues = (obj) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, big(v)]));
+const bigValues = (obj) => obj && Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, big(v)]));
 const withBigBalance = (identity) => identity && { ...identity, balance: big(identity.balance) };
-// BigInt amounts go to Rust as decimal strings; JSON has no 64-bit integers.
-const replacer = (_, v) => (typeof v === 'bigint' ? v.toString() : v);
 
-async function call(method, params = {}) {
-  return JSON.parse(await wasm.call(method, JSON.stringify(params, replacer)));
+// BigInt amounts go to Rust as decimal strings; JSON has no 64-bit integers. A number past 2^53
+// has already lost precision, so it is refused rather than sent rounded.
+function replacer(key, v) {
+  if (typeof v === 'bigint') return v.toString();
+  if (typeof v === 'number' && Number.isInteger(v) && !Number.isSafeInteger(v)) {
+    throw new RangeError(`${key || 'value'} ${v} is beyond 2^53; pass it as a bigint or string`);
+  }
+  return v;
 }
 
-let connected;
+// The module is built with panic=abort: a Rust panic traps, and the instance is unusable after.
+let broken;
+
+async function call(method, params = {}) {
+  if (broken) throw new Error(`Dash Platform module failed earlier in this isolate (${broken}); retry on a new one`);
+  try {
+    return JSON.parse(await wasm.call(method, JSON.stringify(params, replacer)));
+  } catch (e) {
+    if (e instanceof WebAssembly.RuntimeError) broken = e.message;
+    throw e;
+  }
+}
+
+let platform;
 
 export class DashPlatform {
-  /**
-   * Connects this isolate to `network` and loads quorum keys; later calls reuse the connection.
-   * One network per isolate.
-   */
+  /** Connects this isolate to `network`, once; later calls return the same instance. */
   static async connect({ network = 'mainnet' } = {}) {
-    if (connected && connected.network !== network) {
-      throw new Error(`this isolate is connected to ${connected.network}; one network per isolate`);
+    if (platform && platform.network !== network) {
+      throw new Error(`this isolate is connected to ${platform.network}; one network per isolate`);
     }
-    if (!connected) {
-      const ready = wasm.connect(network);
-      connected = { network, ready };
-      ready.catch(() => { connected = undefined; });
+    if (!platform) {
+      wasm.connect(network);
+      platform = new DashPlatform(network);
     }
-    await connected.ready;
-    return new DashPlatform(network);
+    return platform;
   }
 
   constructor(network) {
@@ -84,10 +96,7 @@ export class DashPlatform {
         bigValues(await call('tokens.identityBalances', { identityId, tokenIds })),
       identitiesBalances: async (tokenId, identityIds) =>
         bigValues(await call('tokens.identitiesBalances', { tokenId, identityIds })),
-      totalSupply: async (tokenId) => {
-        const supply = await call('tokens.totalSupply', { tokenId });
-        return supply && bigValues(supply);
-      },
+      totalSupply: async (tokenId) => bigValues(await call('tokens.totalSupply', { tokenId })),
       statuses: (tokenIds) => call('tokens.statuses', { tokenIds }),
       contractInfo: (tokenId) => call('tokens.contractInfo', { tokenId }),
       transfer: (opts) => call('tokens.transfer', opts),

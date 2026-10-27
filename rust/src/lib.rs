@@ -10,26 +10,30 @@ mod queries;
 mod transitions;
 
 use params::Params;
+use serde_json::Value as Json;
 use wasm_bindgen::prelude::*;
 
-/// Errors cross into JS as `Error` objects carrying the SDK's message.
+pub(crate) type JsResult<T = Json> = Result<T, JsError>;
+
+/// Errors cross into JS as `Error` objects carrying the message.
 pub(crate) fn js<E: std::fmt::Display>(error: E) -> JsError {
     JsError::new(&error.to_string())
 }
 
-/// Connects to `network` ("mainnet" or "testnet") and loads quorum keys. Call once per isolate.
+/// Connects to `network` ("mainnet" or "testnet"). Call once per isolate.
 #[wasm_bindgen]
-pub async fn connect(network: String) -> Result<(), JsError> {
-    client::connect(&network).await
+pub fn connect(network: String) -> Result<(), JsError> {
+    client::connect(&network)
 }
 
-/// Runs `method` with JSON `params`, returning JSON. Credit and token amounts are decimal strings.
+/// Runs `method` with JSON `params`, returning JSON. Integers beyond 2^53 (credit and token
+/// amounts among them) cross as decimal strings, since JSON numbers lose them in JS.
 #[wasm_bindgen]
 pub async fn call(method: String, params: String) -> Result<String, JsError> {
     let p = Params::parse(&params)?;
     let sdk = client::sdk()?;
     let sdk = &sdk;
-    let result = match method.as_str() {
+    let mut result = match method.as_str() {
         "identities.fetch" => queries::identity(sdk, &p).await,
         "identities.balance" => queries::identity_balance(sdk, &p).await,
         "identities.balances" => queries::identity_balances(sdk, &p).await,
@@ -46,7 +50,7 @@ pub async fn call(method: String, params: String) -> Result<String, JsError> {
         "dpns.isNameAvailable" => queries::dpns_available(sdk, &p).await,
         "dpns.registerName" => transitions::dpns_register(sdk, &p).await,
 
-        "contracts.fetch" => queries::contract_json(sdk, &p).await,
+        "contracts.fetch" => queries::contract(sdk, &p).await,
         "contracts.fetchMany" => queries::contracts(sdk, &p).await,
 
         "documents.query" => queries::documents(sdk, &p).await,
@@ -74,7 +78,26 @@ pub async fn call(method: String, params: String) -> Result<String, JsError> {
         "epoch.current" => queries::current_epoch(sdk).await,
         "system.totalCredits" => queries::total_credits(sdk).await,
 
-        _ => Err(JsError::new(&format!("unknown method: {method}"))),
+        _ => Err(js(format!("unknown method: {method}"))),
     }?;
+    stringify_unsafe_integers(&mut result);
     Ok(result.to_string())
+}
+
+const MAX_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+fn stringify_unsafe_integers(value: &mut Json) {
+    match value {
+        Json::Number(n) => {
+            let unsafe_integer = n.as_u64().map(|v| v > MAX_SAFE_INTEGER)
+                .or_else(|| n.as_i64().map(|v| v.unsigned_abs() > MAX_SAFE_INTEGER))
+                .unwrap_or(false);
+            if unsafe_integer {
+                *value = Json::String(n.to_string());
+            }
+        }
+        Json::Array(items) => items.iter_mut().for_each(stringify_unsafe_integers),
+        Json::Object(map) => map.values_mut().for_each(stringify_unsafe_integers),
+        _ => {}
+    }
 }

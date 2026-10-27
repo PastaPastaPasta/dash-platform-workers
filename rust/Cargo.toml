@@ -16,6 +16,9 @@ wasm-bindgen-futures = "0.4.58"
 getrandom = { version = "0.2", features = ["js"] }
 serde_json = "1.0"
 hex = "0.4"
+js-sys = "0.3"
+futures = "0.3"
+bip37-bloom-filter = { git = "https://github.com/dashpay/rs-bip37-bloom-filter", branch = "develop" }
 
 [profile.release]
 panic = "abort"

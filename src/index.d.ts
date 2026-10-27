@@ -1,6 +1,6 @@
 /** Base58 identifier of an identity, contract, document or token. */
 export type Id = string;
-/** Amounts accept bigint, number or a decimal string. */
+/** Amounts accept bigint, a decimal string, or a number up to 2^53. */
 export type Amount = bigint | number | string;
 
 /** Signing options shared by every write. */
@@ -48,7 +48,7 @@ export interface DerivedKey {
 export type TokenResult = Record<string, unknown>;
 
 export declare class DashPlatform {
-  /** Connects this isolate (once) and loads quorum keys. One network per isolate. */
+  /** Connects this isolate, once; later calls return the same instance. One network per isolate. */
   static connect(options?: { network?: 'mainnet' | 'testnet' }): Promise<DashPlatform>;
   readonly network: 'mainnet' | 'testnet';
   /** Runs any method by name (e.g. "identities.fetch") with raw JSON results. */
@@ -173,6 +173,7 @@ export declare class DashPlatform {
     }): Promise<TokenResult>;
   };
 
+  /** Core data from DAPI is not proof-verified: it is what the answering evonode reports. */
   core: {
     getTransaction(txid: string): Promise<{
       hex: string;
@@ -187,15 +188,29 @@ export declare class DashPlatform {
     /**
      * Locks Core DASH into Platform credits for `assetLockPrivateKey`. Spends every output of
      * `fundingTxids` that pays `fundingPrivateKey`'s address; change goes back there. Without
-     * `amount` (duffs), locks everything but the fee. Broadcasts and returns the txid.
+     * `amount` (duffs), locks everything but the fee. Broadcasts, then waits for InstantSend.
      */
     create(opts: {
       fundingPrivateKey: string;
       fundingTxids: string[];
       assetLockPrivateKey: string;
       amount?: Amount;
-    }): Promise<{ txid: string; amount: bigint; change: bigint; changeAddress: string }>;
-    /** The asset lock proof (hex) once the transaction is chain-locked, else null. */
+      /** Sets the least amount Platform accepts: 200,000 duffs for "identity", 50,000 for "topUp". */
+      use?: 'identity' | 'topUp';
+    }): Promise<{
+      txid: string;
+      /** The signed transaction, to rebroadcast if needed. */
+      hex: string;
+      amount: bigint;
+      change: bigint;
+      changeAddress: string;
+      /** An InstantSend proof if the lock arrived within 30 s, else null (use `proof` later). */
+      proof: string | null;
+    }>;
+    /**
+     * A chain proof (hex) once the transaction is chain-locked, else null. Platform may refuse
+     * it for a block or two until its view of Core catches up; retry then.
+     */
     proof(txid: string, options?: { outputIndex?: number }): Promise<string | null>;
   };
 

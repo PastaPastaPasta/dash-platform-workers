@@ -68,8 +68,16 @@ that `privateKey` belongs to is used. Keep keys in [Worker secrets](https://deve
   [Durable Object](https://developers.cloudflare.com/durable-objects/) so they are serialized.
 - **One network per isolate.** `connect()` loads one network's quorum keys; connecting the same
   isolate to another network throws.
-- **Trust.** Quorum public keys come from Dash Core Group's quorum service
-  (`quorums.<network>.networks.dash.org`), as in evo-sdk's "trusted" mode.
+- **Trust.** Platform proofs are checked against quorum public keys from Dash Core Group's
+  quorum service (`quorums.<network>.networks.dash.org`), as in evo-sdk's "trusted" mode. Core
+  chain data (`core.*`) is not proved: it is what the answering evonode reports, though a
+  funding transaction must hash to the txid asked for.
+- **Asset locks.** `assetLocks.create` spends every output of `fundingTxids` that pays the
+  funding key, waits up to 30 s for InstantSend and returns a ready proof; otherwise use
+  `assetLocks.proof(txid)` once the block is chain-locked. It refuses amounts below Platform's
+  minimum (200,000 duffs to create an identity, 50,000 to top one up), which would be stranded.
+- **Panics.** The module aborts on a Rust panic; that isolate then refuses further calls with
+  an error, and Cloudflare replaces it.
 
 ## Building
 

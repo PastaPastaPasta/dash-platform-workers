@@ -5,6 +5,8 @@ const dec = new TextDecoder();
 const CRLF = enc.encode('\r\n');
 const HEADER_END = enc.encode('\r\n\r\n');
 const SKIPPED_HEADERS = new Set(['host', 'content-length', 'connection', 'transfer-encoding']);
+const MAX_HEAD = 64 * 1024;
+const MAX_CHUNK = 16 * 1024 * 1024;
 
 /** Serializes `req` (whose body is already read into `body`) for a socket. */
 export function encodeRequest(req, url, body) {
@@ -13,7 +15,59 @@ export function encodeRequest(req, url, body) {
     if (!SKIPPED_HEADERS.has(name)) head += `${name}: ${value}\r\n`;
   }
   head += `Content-Length: ${body.length}\r\nConnection: close\r\n\r\n`;
-  return concat([enc.encode(head), body]);
+  const headBytes = enc.encode(head);
+  const out = new Uint8Array(headBytes.length + body.length);
+  out.set(headBytes);
+  out.set(body, headBytes.length);
+  return out;
+}
+
+/** Bytes read from the socket but not yet consumed, grown by doubling so reads stay linear. */
+class ByteQueue {
+  constructor(reader) {
+    this.reader = reader;
+    this.buf = new Uint8Array(4096);
+    this.start = 0;
+    this.end = 0;
+  }
+
+  get length() { return this.end - this.start; }
+
+  view() { return this.buf.subarray(this.start, this.end); }
+
+  /** Reads once more from the socket; false at EOF. */
+  async fill() {
+    const { value, done } = await this.reader.read();
+    if (done) return false;
+    if (this.end + value.length > this.buf.length) {
+      const size = Math.max(this.length + value.length, this.buf.length * 2);
+      const next = new Uint8Array(size);
+      next.set(this.view());
+      this.end = this.length;
+      this.start = 0;
+      this.buf = next;
+    }
+    this.buf.set(value, this.end);
+    this.end += value.length;
+    return true;
+  }
+
+  /** Removes and returns the first `n` bytes (a copy, since the buffer is reused). */
+  take(n) {
+    const out = this.buf.slice(this.start, this.start + n);
+    this.start += n;
+    return out;
+  }
+
+  /** Index of `needle` in the unconsumed bytes, or -1. */
+  find(needle) {
+    const view = this.view();
+    outer: for (let i = 0; i <= view.length - needle.length; i++) {
+      for (let j = 0; j < needle.length; j++) if (view[i + j] !== needle[j]) continue outer;
+      return i;
+    }
+    return -1;
+  }
 }
 
 /**
@@ -23,16 +77,17 @@ export function encodeRequest(req, url, body) {
 export async function readResponse(readable, release = () => {}) {
   const reader = readable.getReader();
   try {
-    let buf = new Uint8Array(0);
+    const queue = new ByteQueue(reader);
     let end;
-    while ((end = indexOf(buf, HEADER_END)) < 0) {
-      const { value, done } = await reader.read();
-      if (done) throw new Error('truncated HTTP response');
-      buf = concat([buf, value]);
+    while ((end = queue.find(HEADER_END)) < 0) {
+      if (queue.length > MAX_HEAD) throw new Error('HTTP response head too large');
+      if (!(await queue.fill())) throw new Error('truncated HTTP response');
     }
-    const [statusLine, ...lines] = dec.decode(buf.subarray(0, end)).split('\r\n');
-    const status = Number(statusLine.split(' ')[1]);
-    if (!/^HTTP\/1\.[01]$/.test(statusLine.split(' ')[0]) || !Number.isInteger(status)) {
+    const [statusLine, ...lines] = dec.decode(queue.take(end)).split('\r\n');
+    queue.take(HEADER_END.length);
+    const [version, code] = statusLine.split(' ');
+    const status = Number(code);
+    if (!/^HTTP\/1\.[01]$/.test(version) || !Number.isInteger(status)) {
       throw new Error(`malformed status line: ${statusLine}`);
     }
     const headers = new Headers();
@@ -40,11 +95,15 @@ export async function readResponse(readable, release = () => {}) {
       const colon = line.indexOf(':');
       if (colon > 0) headers.append(line.slice(0, colon).trim(), line.slice(colon + 1).trim());
     }
-    const rest = buf.subarray(end + HEADER_END.length);
     const chunked = /chunked/i.test(headers.get('transfer-encoding') ?? '');
     headers.delete('transfer-encoding');
-    const length = headers.has('content-length') ? Number(headers.get('content-length')) : undefined;
-    const source = chunked ? chunkedBody(reader, rest) : plainBody(reader, rest, length);
+    let length;
+    if (!chunked && headers.has('content-length')) {
+      const value = headers.get('content-length');
+      if (!/^\d+$/.test(value)) throw new Error(`malformed content-length: ${value}`);
+      length = Number(value);
+    }
+    const source = chunked ? chunkedBody(queue) : plainBody(queue, length);
     return new Response(stream(source, reader, release), { status, headers });
   } catch (e) {
     reader.cancel().catch(() => {});
@@ -57,13 +116,22 @@ export async function readResponse(readable, release = () => {}) {
 function stream(source, reader, release) {
   let released = false;
   const finish = () => {
-    if (!released) { released = true; reader.cancel().catch(() => {}); release(); }
+    if (!released) {
+      released = true;
+      reader.cancel().catch(() => {});
+      release();
+    }
   };
   return new ReadableStream({
     async pull(controller) {
       try {
         const { value, done } = await source.next();
-        if (done) { controller.close(); finish(); } else controller.enqueue(value);
+        if (done) {
+          controller.close();
+          finish();
+        } else {
+          controller.enqueue(value);
+        }
       } catch (e) {
         controller.error(e);
         finish();
@@ -74,60 +142,38 @@ function stream(source, reader, release) {
 }
 
 /** A body delimited by Content-Length, or by the end of the connection without one. */
-async function* plainBody(reader, rest, length) {
+async function* plainBody(queue, length) {
   let remaining = length ?? Infinity;
-  if (rest.length) {
-    const part = rest.subarray(0, Math.min(rest.length, remaining));
-    remaining -= part.length;
-    if (part.length) yield part;
-  }
   while (remaining > 0) {
-    const { value, done } = await reader.read();
-    if (done) {
+    if (queue.length === 0 && !(await queue.fill())) {
       if (length !== undefined) throw new Error('truncated HTTP body');
       return;
     }
-    const part = value.subarray(0, Math.min(value.length, remaining));
+    const part = queue.take(Math.min(queue.length, remaining));
     remaining -= part.length;
-    if (part.length) yield part;
+    yield part;
   }
 }
 
 /** A chunked body, yielding each chunk's data as soon as it is complete. */
-async function* chunkedBody(reader, rest) {
-  let buf = rest;
-  const fill = async () => {
-    const { value, done } = await reader.read();
-    if (done) throw new Error('truncated chunked body');
-    buf = concat([buf, value]);
-  };
+async function* chunkedBody(queue) {
   for (;;) {
     let lineEnd;
-    while ((lineEnd = indexOf(buf, CRLF)) < 0) await fill();
-    const size = parseInt(dec.decode(buf.subarray(0, lineEnd)), 16);
-    if (Number.isNaN(size)) throw new Error('malformed chunk size');
+    while ((lineEnd = queue.find(CRLF)) < 0) {
+      if (queue.length > 1024) throw new Error('malformed chunk size');
+      if (!(await queue.fill())) throw new Error('truncated chunked body');
+    }
+    const line = dec.decode(queue.take(lineEnd));
+    queue.take(CRLF.length);
+    const sizeText = line.split(';')[0].trim();
+    if (!/^[0-9a-f]+$/i.test(sizeText)) throw new Error(`malformed chunk size: ${line}`);
+    const size = parseInt(sizeText, 16);
+    if (size > MAX_CHUNK) throw new Error(`chunk of ${size} bytes is too large`);
     if (size === 0) return;
-    const start = lineEnd + CRLF.length;
-    while (buf.length < start + size + CRLF.length) await fill();
-    yield buf.slice(start, start + size);
-    buf = buf.subarray(start + size + CRLF.length);
+    while (queue.length < size + CRLF.length) {
+      if (!(await queue.fill())) throw new Error('truncated chunked body');
+    }
+    yield queue.take(size);
+    queue.take(CRLF.length);
   }
-}
-
-function indexOf(buf, needle, from = 0) {
-  outer: for (let i = from; i <= buf.length - needle.length; i++) {
-    for (let j = 0; j < needle.length; j++) if (buf[i + j] !== needle[j]) continue outer;
-    return i;
-  }
-  return -1;
-}
-
-export function concat(parts) {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let offset = 0;
-  for (const p of parts) {
-    out.set(p, offset);
-    offset += p.length;
-  }
-  return out;
 }

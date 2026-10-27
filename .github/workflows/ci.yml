@@ -24,7 +24,11 @@ jobs:
           sudo apt-get update && sudo apt-get install -y clang llvm protobuf-compiler
       - uses: taiki-e/install-action@v2
         with:
-          tool: wasm-bindgen@0.2.108,wasm-opt
+          tool: wasm-bindgen@0.2.108
+      - name: wasm-opt (binaryen version_133)
+        run: |
+          curl -fsSL https://github.com/WebAssembly/binaryen/releases/download/version_133/binaryen-version_133-x86_64-linux.tar.gz | tar xz -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/binaryen-version_133/bin" >> "$GITHUB_PATH"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust

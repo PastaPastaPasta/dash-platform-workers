@@ -8,5 +8,5 @@ NETWORK = "mainnet"
 [observability]
 enabled = true
 
-# For POST /transfer: `wrangler secret put WRITE_TOKEN`, `IDENTITY_ID` and `TRANSFER_KEY`
-# (the WIF of the identity's TRANSFER key).
+# POST /rpc (writes included) needs a bearer token: `wrangler secret put WRITE_TOKEN`. Anyone
+# holding it can spend whatever keys they send, so try it on testnet first (NETWORK = "testnet").
