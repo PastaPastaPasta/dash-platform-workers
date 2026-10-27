@@ -20,6 +20,19 @@ pub(crate) fn js<E: std::fmt::Display>(error: E) -> JsError {
     JsError::new(&error.to_string())
 }
 
+#[wasm_bindgen]
+extern "C" {
+    /// Set by index.js. With panic=abort a panic traps inside whichever microtask was polling,
+    /// so the promise `call` returned would never settle; this tells JS first.
+    #[wasm_bindgen(js_namespace = globalThis, js_name = __dashPlatformPanic)]
+    fn report_panic(message: &str);
+}
+
+#[wasm_bindgen(start)]
+fn start() {
+    std::panic::set_hook(Box::new(|info| report_panic(&info.to_string())));
+}
+
 /// Connects to `network` ("mainnet" or "testnet"). Call once per isolate.
 #[wasm_bindgen]
 pub fn connect(network: String) -> Result<(), JsError> {

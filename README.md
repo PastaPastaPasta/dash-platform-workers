@@ -66,8 +66,8 @@ that `privateKey` belongs to is used. Keep keys in [Worker secrets](https://deve
 - **Concurrent writes from one identity.** Identity nonces are per identity, and Cloudflare runs
   many isolates. Send writes for one identity through a single
   [Durable Object](https://developers.cloudflare.com/durable-objects/) so they are serialized.
-- **One network per isolate.** `connect()` loads one network's quorum keys; connecting the same
-  isolate to another network throws.
+- **One network per isolate.** `connect()` sets up one network (quorum keys are fetched as
+  proofs need them); connecting the same isolate to another network throws.
 - **Trust.** Platform proofs are checked against quorum public keys from Dash Core Group's
   quorum service (`quorums.<network>.networks.dash.org`), as in evo-sdk's "trusted" mode. Core
   chain data (`core.*`) is not proved: it is what the answering evonode reports, though a

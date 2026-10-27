@@ -134,3 +134,12 @@ test('should count multi-byte header values in the framed length', () => {
   const framed = encodeRequest(req, url, new Uint8Array([9, 9]));
   assert.deepEqual([...framed.slice(-2)], [9, 9]);
 });
+
+test('should stream many chunks intact while reusing its buffer', async () => {
+  const chunk = (i) => `400\r\n${String(i % 10).repeat(1024)}\r\n`;
+  const parts = ['HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n', ...Array.from({ length: 2000 }, (_, i) => chunk(i)), '0\r\n\r\n'];
+  const res = await readResponse(socket(parts));
+  const text = await res.text();
+  assert.equal(text.length, 2000 * 1024);
+  assert.equal(text.slice(1999 * 1024), '9'.repeat(1024));
+});

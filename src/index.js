@@ -4,6 +4,17 @@ import wasmModule from '../dist/wasm/dash_platform_bg.wasm';
 // Routes the SDK's requests to evonode IPs over TLS sockets; see ip-fetch.js.
 import './ip-fetch.js';
 
+// The module is built with panic=abort: a Rust panic traps inside whichever microtask was
+// polling, so the call's promise would never settle. Its panic hook reports here first; every
+// pending call is failed and later ones are refused, since the instance's state is gone.
+let broken;
+const pending = new Set();
+globalThis.__dashPlatformPanic = (message) => {
+  broken = message;
+  for (const reject of pending) reject(new Error(`Dash Platform module panicked: ${message}`));
+  pending.clear();
+};
+
 // Instantiating at module scope bills compilation to Worker startup, not to the first request.
 wasm.initSync({ module: wasmModule });
 
@@ -21,17 +32,15 @@ function replacer(key, v) {
   return v;
 }
 
-// The module is built with panic=abort: a Rust panic traps, and the instance is unusable after.
-let broken;
-
-async function call(method, params = {}) {
-  if (broken) throw new Error(`Dash Platform module failed earlier in this isolate (${broken}); retry on a new one`);
-  try {
-    return JSON.parse(await wasm.call(method, JSON.stringify(params, replacer)));
-  } catch (e) {
-    if (e instanceof WebAssembly.RuntimeError) broken = e.message;
-    throw e;
-  }
+function call(method, params = {}) {
+  if (broken) return Promise.reject(new Error(`Dash Platform module panicked earlier in this isolate: ${broken}`));
+  return new Promise((resolve, reject) => {
+    pending.add(reject);
+    Promise.resolve()
+      .then(() => wasm.call(method, JSON.stringify(params, replacer)))
+      .then((json) => resolve(JSON.parse(json)), reject)
+      .finally(() => pending.delete(reject));
+  });
 }
 
 let platform;

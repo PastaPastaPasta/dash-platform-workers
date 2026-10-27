@@ -14,6 +14,7 @@ use dash_sdk::dpp::document::document_methods::DocumentMethodsV0;
 use dash_sdk::dpp::document::{DocumentV0Getters, DocumentV0Setters};
 use dash_sdk::dpp::identity::accessors::IdentityGettersV0;
 use dash_sdk::dpp::identity::identity_public_key::accessors::v0::IdentityPublicKeyGettersV0;
+use dash_sdk::dpp::identity::identity_public_key::methods::hash::IdentityPublicKeyHashMethodsV0;
 use dash_sdk::dpp::identity::identity_public_key::v0::IdentityPublicKeyV0;
 use dash_sdk::dpp::identity::signer::Signer;
 use dash_sdk::dpp::identity::{Identity, IdentityPublicKey, KeyType, Purpose, SecurityLevel};
@@ -35,6 +36,7 @@ use dash_sdk::platform::transition::put_identity::PutIdentity;
 use dash_sdk::platform::transition::top_up_identity::TopUpIdentity;
 use dash_sdk::platform::transition::transfer::TransferToIdentity;
 use dash_sdk::platform::transition::withdraw_from_identity::WithdrawFromIdentity;
+use dash_sdk::platform::types::identity::PublicKeyHash;
 use dash_sdk::platform::{Document, Fetch};
 use dash_sdk::Sdk;
 use serde_json::{json, Value as Json};
@@ -196,6 +198,13 @@ pub(crate) async fn identity_create(sdk: &Sdk, p: &Params) -> JsResult {
         .count();
     if masters != 1 {
         return Err(js(format!("keys must hold exactly one MASTER AUTHENTICATION key, not {masters}")));
+    }
+    // Platform also charges the lock when a key already belongs to another identity.
+    for key in keys.values() {
+        let hash = key.public_key_hash().map_err(js)?;
+        if Identity::fetch(sdk, PublicKeyHash(hash)).await.map_err(js)?.is_some() {
+            return Err(js(format!("key {} already belongs to another identity", key.id())));
+        }
     }
     let identity_id = proof.create_identifier().map_err(js)?;
     let identity = Identity::new_with_id_and_keys(identity_id, keys, sdk.version()).map_err(js)?;

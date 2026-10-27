@@ -25,7 +25,9 @@ use dash_sdk::dpp::dashcore::{
 use dash_sdk::dpp::identity::state_transition::asset_lock_proof::chain::ChainAssetLockProof;
 use dash_sdk::dpp::identity::state_transition::asset_lock_proof::InstantAssetLockProof;
 use dash_sdk::dpp::prelude::AssetLockProof;
-use dash_sdk::platform::dapi::{DapiRequestExecutor, IntoInner, RequestSettings};
+use dash_sdk::dapi_grpc::tonic::Code;
+use dash_sdk::platform::dapi::transport::TransportError;
+use dash_sdk::platform::dapi::{DapiClientError, DapiRequestExecutor, IntoInner, RequestSettings};
 use dash_sdk::Sdk;
 use futures::future::{select, Either};
 use serde_json::{json, Value as Json};
@@ -44,22 +46,30 @@ const MIN_LOCK_FOR_TOP_UP: u64 = 50_000;
 /// How long `assetLocks.create` waits for the InstantSend lock before leaving it to a chain lock.
 const INSTANT_LOCK_WAIT_MS: i32 = 30_000;
 
-async fn transaction(sdk: &Sdk, id: &str) -> JsResult<dash_sdk::core::FetchedCoreTransaction> {
-    let txid: Txid = id.parse().map_err(|e| js(format!("invalid txid {id}: {e}")))?;
-    let fetched = sdk
-        .get_transaction(id)
-        .await
-        .map_err(js)?
-        .ok_or_else(|| js(format!("transaction not found: {id}")))?;
-    // DAPI's answer is unproved; the hash at least pins its content to what was asked for.
+fn parse_txid(id: &str) -> JsResult<Txid> {
+    id.parse().map_err(|e| js(format!("invalid txid {id}: {e}")))
+}
+
+/// A Core transaction from DAPI, checked to hash to `txid`: DAPI's answer is unproved, but the
+/// hash at least pins its content to what was asked for.
+async fn transaction(sdk: &Sdk, txid: Txid) -> JsResult<Option<dash_sdk::core::FetchedCoreTransaction>> {
+    let Some(fetched) = sdk.get_transaction(&txid.to_string()).await.map_err(js)? else {
+        return Ok(None);
+    };
     if fetched.transaction.txid() != txid {
-        return Err(js(format!("evonode returned a different transaction for {id}")));
+        return Err(js(format!("evonode returned a different transaction for {txid}")));
     }
-    Ok(fetched)
+    Ok(Some(fetched))
+}
+
+async fn existing_transaction(sdk: &Sdk, txid: Txid) -> JsResult<dash_sdk::core::FetchedCoreTransaction> {
+    transaction(sdk, txid)
+        .await?
+        .ok_or_else(|| js(format!("transaction not found: {txid}")))
 }
 
 pub(crate) async fn get_transaction(sdk: &Sdk, p: &Params) -> JsResult {
-    let Some(tx) = sdk.get_transaction(p.str("txid")?).await.map_err(js)? else {
+    let Some(tx) = transaction(sdk, parse_txid(p.str("txid")?)?).await? else {
         return Ok(Json::Null);
     };
     Ok(json!({
@@ -79,9 +89,19 @@ async fn broadcast(sdk: &Sdk, tx: &Transaction) -> JsResult<()> {
     };
     match sdk.execute(request, RequestSettings::default()).await.into_inner() {
         Ok(_) => Ok(()),
-        Err(e) if e.to_string().to_lowercase().contains("already") => Ok(()),
+        Err(e) if already_exists(&e) => Ok(()),
         Err(e) => Err(js(format!("broadcast failed: {e}"))),
     }
+}
+
+fn already_exists(error: &DapiClientError) -> bool {
+    let transport = match error {
+        DapiClientError::Transport(e) => e,
+        DapiClientError::NoAvailableAddressesToRetry(e) => e.as_ref(),
+        _ => return false,
+    };
+    let TransportError::Grpc(status) = transport;
+    status.code() == Code::AlreadyExists
 }
 
 pub(crate) async fn broadcast_transaction(sdk: &Sdk, p: &Params) -> JsResult {
@@ -103,6 +123,7 @@ pub(crate) async fn create_asset_lock(sdk: &Sdk, p: &Params) -> JsResult {
     let funding_public_key = funding_key.public_key();
     let funding_script = ScriptBuf::new_p2pkh(&funding_public_key.pubkey_hash());
     let credit_script = ScriptBuf::new_p2pkh(&lock_key.public_key().pubkey_hash());
+    let txids = p.strs("fundingTxids")?.into_iter().map(parse_txid).collect::<JsResult<BTreeSet<_>>>()?;
     let minimum = match p.opt_str("use")?.unwrap_or("identity") {
         "identity" => MIN_LOCK_FOR_IDENTITY,
         "topUp" => MIN_LOCK_FOR_TOP_UP,
@@ -110,9 +131,8 @@ pub(crate) async fn create_asset_lock(sdk: &Sdk, p: &Params) -> JsResult {
     };
 
     let mut spent = Vec::new();
-    for id in p.strs("fundingTxids")?.into_iter().collect::<BTreeSet<_>>() {
-        let funding = transaction(sdk, id).await?.transaction;
-        let txid = funding.txid();
+    for txid in txids {
+        let funding = existing_transaction(sdk, txid).await?.transaction;
         for (vout, out) in (0u32..).zip(funding.output) {
             if out.script_pubkey == funding_script {
                 spent.push((OutPoint::new(txid, vout), out));
@@ -178,17 +198,20 @@ pub(crate) async fn create_asset_lock(sdk: &Sdk, p: &Params) -> JsResult {
         input.script_sig = script_sig;
     }
 
-    // Subscribe before broadcasting so the InstantSend lock cannot slip past. The filter names the
-    // funding key (its input) as well as both addresses, so it matches however Core filters.
-    let stream = instant_lock_stream(
-        sdk,
-        &[
-            &credit_script.as_bytes()[3..23],
-            &funding_script.as_bytes()[3..23],
-            &funding_public_key.to_bytes(),
-        ],
-    )
-    .await;
+    // Subscribe before broadcasting so the InstantSend lock cannot slip past. DAPI matches the
+    // filter against the txid, outputs and scriptSig pushes (not the credit outputs), so it names
+    // the txid in both byte orders and the funding key, which every input pushes.
+    let txid = tx.txid();
+    let mut reversed_txid = txid.to_byte_array();
+    reversed_txid.reverse();
+    let funding_hash = funding_public_key.pubkey_hash();
+    let elements: [&[u8]; 4] = [
+        &txid.to_byte_array(),
+        &reversed_txid,
+        &funding_public_key.to_bytes(),
+        funding_hash.as_byte_array(),
+    ];
+    let stream = instant_lock_stream(sdk, &elements).await;
     broadcast(sdk, &tx).await?;
     let proof = match stream {
         Ok(stream) => match wait_for_instant_lock(stream, &tx).await {
@@ -212,14 +235,18 @@ pub(crate) async fn create_asset_lock(sdk: &Sdk, p: &Params) -> JsResult {
 }
 
 async fn instant_lock_stream(sdk: &Sdk, elements: &[&[u8]]) -> JsResult<Streaming<dash_sdk::dapi_grpc::core::v0::TransactionsWithProofsResponse>> {
-    let tip = sdk
+    // Start a couple of blocks back: the status and the subscription may reach different nodes,
+    // and one a block behind would not know the tip yet.
+    let height = sdk
         .execute(GetBlockchainStatusRequest {}, RequestSettings::default())
         .await
         .into_inner()
         .map_err(js)?
         .chain
         .ok_or_else(|| js("evonode reported no chain status"))?
-        .best_block_hash;
+        .blocks_count
+        .saturating_sub(2)
+        .max(1);
     let filter = elements
         .iter()
         .fold(BloomFilter::builder(elements.len() as u32, 0.001).map_err(|_| js("bloom filter"))?, |b, e| b.add_element(e))
@@ -229,7 +256,7 @@ async fn instant_lock_stream(sdk: &Sdk, elements: &[&[u8]]) -> JsResult<Streamin
         bloom_filter: Some(dash_sdk::dapi_grpc::core::v0::BloomFilter { v_data, n_hash_funcs, n_tweak, n_flags }),
         count: 0,
         send_transaction_hashes: true,
-        from_block: Some(FromBlock::FromBlockHash(tip)),
+        from_block: Some(FromBlock::FromBlockHeight(height)),
     };
     sdk.execute(request, RequestSettings::default()).await.into_inner().map_err(js)
 }
@@ -279,8 +306,7 @@ fn proof_hex(proof: &AssetLockProof) -> JsResult<String> {
 /// that `identities.create` and `identities.topUp` take; `null` until then. Platform may still
 /// refuse it for a block or two, until its own view of Core reaches that height; retry then.
 pub(crate) async fn asset_lock_proof(sdk: &Sdk, p: &Params) -> JsResult {
-    let id = p.str("txid")?;
-    let tx = transaction(sdk, id).await?;
+    let tx = existing_transaction(sdk, parse_txid(p.str("txid")?)?).await?;
     if !tx.is_chain_locked || tx.height == 0 {
         return Ok(Json::Null);
     }

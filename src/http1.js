@@ -40,12 +40,16 @@ class ByteQueue {
     const { value, done } = await this.reader.read();
     if (done) return false;
     if (this.end + value.length > this.buf.length) {
-      const size = Math.max(this.length + value.length, this.buf.length * 2);
-      const next = new Uint8Array(size);
-      next.set(this.view());
+      if (this.length + value.length <= this.buf.length) {
+        // Enough room once consumed bytes are dropped: slide the unread ones to the front.
+        this.buf.copyWithin(0, this.start, this.end);
+      } else {
+        const next = new Uint8Array(Math.max(this.length + value.length, this.buf.length * 2));
+        next.set(this.view());
+        this.buf = next;
+      }
       this.end = this.length;
       this.start = 0;
-      this.buf = next;
     }
     this.buf.set(value, this.end);
     this.end += value.length;

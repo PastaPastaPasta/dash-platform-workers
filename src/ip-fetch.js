@@ -6,10 +6,20 @@ import { connect } from 'cloudflare:sockets';
 import { encodeRequest, readResponse } from './http1.js';
 
 const IPV4 = /^\d{1,3}(?:\.\d{1,3}){3}$/;
-// The wasm build of the DAPI client sets no deadline of its own, so a node that accepts the
-// connection and then stalls would hang the request; unary calls give up after this. Streams
-// (DAPI's subscribe* methods) stay open until the caller drops them.
-const UNARY_TIMEOUT_MS = 15_000;
+// The wasm build of the DAPI client enforces no deadline itself, so a node that accepts the
+// connection and then stalls would hang the request. Unary calls get the deadline the client
+// put in `grpc-timeout` plus a margin (DAPI itself waits up to 30 s for a state transition's
+// result). Streams (DAPI's subscribe* methods) only get a deadline for their response head,
+// then stay open until the caller drops them.
+const DEFAULT_TIMEOUT_MS = 35_000;
+const MARGIN_MS = 5_000;
+const STREAM_HEAD_TIMEOUT_MS = 10_000;
+const GRPC_UNITS_MS = { H: 3_600_000, M: 60_000, S: 1_000, m: 1, u: 0.001, n: 0.000001 };
+
+function deadline(req) {
+  const match = /^(\d{1,8})([HMSmun])$/.exec(req.headers.get('grpc-timeout') ?? '');
+  return match ? Number(match[1]) * GRPC_UNITS_MS[match[2]] + MARGIN_MS : DEFAULT_TIMEOUT_MS;
+}
 
 const nativeFetch = globalThis.fetch;
 globalThis.fetch = (input, init) => {
@@ -29,12 +39,15 @@ async function socketFetch(req, url) {
     socket.close().catch(() => {});
   };
   req.signal?.addEventListener('abort', close);
-  if (!/\/subscribe/i.test(url.pathname)) timer = setTimeout(close, UNARY_TIMEOUT_MS);
+  const streaming = /\/subscribe/i.test(url.pathname);
+  timer = setTimeout(close, streaming ? STREAM_HEAD_TIMEOUT_MS : deadline(req));
   try {
     const writer = socket.writable.getWriter();
     await writer.write(encodeRequest(req, url, body));
     writer.releaseLock();
-    return await readResponse(socket.readable, close);
+    const response = await readResponse(socket.readable, close);
+    if (streaming) clearTimeout(timer);
+    return response;
   } catch (e) {
     close();
     throw e;
