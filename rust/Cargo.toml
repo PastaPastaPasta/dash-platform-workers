@@ -1,0 +1,25 @@
+[package]
+name = "dash-platform-workers"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dash-sdk = { git = "https://github.com/dashpay/platform", rev = "078a6596e406ef3c4f99d260619675971f2ad34c", default-features = false }
+rs-sdk-trusted-context-provider = { git = "https://github.com/dashpay/platform", rev = "078a6596e406ef3c4f99d260619675971f2ad34c" }
+simple-signer = { git = "https://github.com/dashpay/platform", rev = "078a6596e406ef3c4f99d260619675971f2ad34c", features = ["state-transitions"] }
+wasm-bindgen = "=0.2.108"
+wasm-bindgen-futures = "0.4.58"
+getrandom = { version = "0.2", features = ["js"] }
+serde_json = "1.0"
+hex = "0.4"
+
+[profile.release]
+panic = "abort"
+strip = true
+lto = true
+opt-level = "z"
+codegen-units = 1

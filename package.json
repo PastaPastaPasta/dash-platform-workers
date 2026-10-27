@@ -1,0 +1,23 @@
+{
+  "name": "dash-platform-workers",
+  "version": "0.1.0",
+  "description": "Proof-verified Dash Platform reads and writes from Cloudflare Workers, sized for the Free plan",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./src/index.d.ts",
+      "workerd": "./src/index.js",
+      "worker": "./src/index.js"
+    }
+  },
+  "files": [
+    "src",
+    "dist/wasm/dash_platform.js",
+    "dist/wasm/dash_platform_bg.wasm"
+  ],
+  "scripts": {
+    "build": "scripts/build.sh",
+    "test": "node --test test/*.test.js"
+  }
+}

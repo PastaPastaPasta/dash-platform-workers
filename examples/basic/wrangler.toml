@@ -1,0 +1,12 @@
+name = "dash-platform-example"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+NETWORK = "mainnet"
+
+[observability]
+enabled = true
+
+# For POST /transfer: `wrangler secret put WRITE_TOKEN`, `IDENTITY_ID` and `TRANSFER_KEY`
+# (the WIF of the identity's TRANSFER key).
