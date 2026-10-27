@@ -1,7 +1,8 @@
 // Card data for Yappr link previews: the author, text and image of a post or profile, read from
 // Platform with proofs. Reached only through the router's service binding, never publicly.
 //
-// GET /?kind=post|user&id=<base58> → JSON card, or null when there is none to show.
+// GET /?kind=post|user&id=<base58>&contract=<social contract> → JSON card, or null when there is
+// none to show. Each Yappr deployment has its own social contract; only SOCIAL_CONTRACTS are read.
 import { DashPlatform } from '../../../src/index.js';
 
 const IDENTIFIER = /^[1-9A-HJ-NP-Za-km-z]{42,44}$/;
@@ -26,15 +27,17 @@ export default {
     const url = new URL(req.url);
     const kind = url.searchParams.get('kind');
     const id = url.searchParams.get('id') ?? '';
-    if ((kind !== 'post' && kind !== 'user') || !IDENTIFIER.test(id)) {
+    const contract = url.searchParams.get('contract') ?? '';
+    const allowed = env.SOCIAL_CONTRACTS.split(',').map((c) => c.trim());
+    if ((kind !== 'post' && kind !== 'user') || !IDENTIFIER.test(id) || !allowed.includes(contract)) {
       return Response.json(null, { status: 400 });
     }
 
-    const key = new Request(`https://yappr-cards.internal/${kind}/${id}`);
+    const key = new Request(`https://yappr-cards.internal/${contract}/${kind}/${id}`);
     const cached = await caches.default.match(key);
     if (cached) return cached;
 
-    const lookup = cardFor(kind, id, env).catch(() => null);
+    const lookup = cardFor(kind, id, contract, env).catch(() => null);
     ctx.waitUntil(
       lookup.then((card) =>
         caches.default.put(key, Response.json(card, {
@@ -47,7 +50,7 @@ export default {
   },
 };
 
-async function cardFor(kind, id, env) {
+async function cardFor(kind, id, contract, env) {
   const dash = await DashPlatform.connect({ network: env.NETWORK });
   if (kind === 'user') {
     const who = await author(dash, env, id);
@@ -62,8 +65,8 @@ async function cardFor(kind, id, env) {
     };
   }
   const [post, reply] = await Promise.all([
-    dash.documents.get(env.SOCIAL_CONTRACT, 'post', id),
-    dash.documents.get(env.SOCIAL_CONTRACT, 'reply', id),
+    dash.documents.get(contract, 'post', id),
+    dash.documents.get(contract, 'reply', id),
   ]);
   const doc = post ?? reply;
   if (!doc) return null;

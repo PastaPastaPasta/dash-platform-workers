@@ -32,7 +32,7 @@ export default {
     for (const name of DROPPED_HEADERS) headers.delete(name);
     const [html, card] = await Promise.all([
       fetch(target, { headers, redirect: 'manual' }),
-      env.CARDS.fetch(`https://cards/?kind=${kind}&id=${id}`)
+      env.CARDS.fetch(`https://cards/?kind=${kind}&id=${id}&contract=${env.SOCIAL_CONTRACT}`)
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null),
     ]);
