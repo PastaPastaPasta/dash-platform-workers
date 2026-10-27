@@ -2,13 +2,10 @@ name = "yappr-embeds"
 main = "worker.js"
 compatibility_date = "2026-10-01"
 
-# On Yappr's zone: drop ORIGIN and add
-#   routes = [{ pattern = "yap.pr/post*", zone_name = "yap.pr" }, { pattern = "yap.pr/user*", zone_name = "yap.pr" }]
-# With ORIGIN set (as here, on workers.dev) it serves the live site from anywhere, for testing.
-# Set the route's failure mode to "fail open" so the site stays up if this Worker can't run.
+# Serves /_embed/post?id=… and /_embed/user?id=…, which a redirect rule on the site's zone sends
+# link-preview crawlers to (see README). Here on workers.dev, for testing, previews link to yap.pr.
 [vars]
-ORIGIN = "https://yap.pr"
-CANONICAL_ORIGIN = "https://yap.pr"
+SITE_ORIGIN = "https://yap.pr"
 # The social contract of the site's build (YAPPR_CONTRACT_ID in Yappr's lib/constants.ts on master).
 SOCIAL_CONTRACT = "EWR695MsqPUuW8EnTbYzD4KybNQD5n7CUDWydJYNg63F"
 
@@ -19,16 +16,11 @@ service = "yappr-cards"
 [observability]
 enabled = true
 
-# yappr.thepasta.org: the Cloudflare Pages mirror of yap.pr, on a zone in this account.
-# `wrangler deploy --env thepasta`. Wrangler can't set a route's failure mode: after deploying,
-# check both routes have `request_limit_fail_open: true` (dashboard or the zone routes API), so
-# going over the Free plan's daily request limit skips the Worker instead of failing the page.
+# yappr.thepasta.org, the Cloudflare Pages mirror of yap.pr: `wrangler deploy --env thepasta`.
+# Only /_embed/* runs a Worker; previews link to the same host.
 [env.thepasta]
 workers_dev = false
-routes = [
-  { pattern = "yappr.thepasta.org/post*", zone_name = "thepasta.org" },
-  { pattern = "yappr.thepasta.org/user*", zone_name = "thepasta.org" },
-]
+routes = [{ pattern = "yappr.thepasta.org/_embed/*", zone_name = "thepasta.org" }]
 # Environments don't inherit vars; the mirror serves the same master build as yap.pr.
 vars = { SOCIAL_CONTRACT = "EWR695MsqPUuW8EnTbYzD4KybNQD5n7CUDWydJYNg63F" }
 

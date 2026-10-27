@@ -97,6 +97,20 @@ npm test
   for any method. Try it locally with `npx wrangler dev`.
 - [`examples/yappr-embeds`](examples/yappr-embeds): rich link previews for
   [Yappr](https://yap.pr). Yappr is a static app, so Discord, Slack and X see a generic page for
-  every post. A tiny `router` Worker in front of the site passes people through untouched and
-  answers crawlers with the post's author, text and avatar, which a `cards` Worker reads from
-  Platform behind a service binding. Deploy `cards` first.
+  every post. A redirect rule on the site's zone sends only link-preview crawlers to `/_embed/…`,
+  where a small `router` Worker answers with the post's author, text and avatar; a `cards` Worker
+  reads them from Platform behind a service binding. People never touch a Worker. The rule, a
+  Cloudflare single redirect (302, preserve query string):
+
+  ```
+  When: (http.host eq "yappr.thepasta.org"
+         and (starts_with(http.request.uri.path, "/post") or starts_with(http.request.uri.path, "/user"))
+         and (lower(http.user_agent) contains "discordbot" or lower(http.user_agent) contains "slackbot"
+              or lower(http.user_agent) contains "twitterbot" or lower(http.user_agent) contains "facebookexternalhit"
+              or lower(http.user_agent) contains "telegrambot" or lower(http.user_agent) contains "whatsapp"
+              or lower(http.user_agent) contains "linkedinbot" or lower(http.user_agent) contains "redditbot"
+              or lower(http.user_agent) contains "mastodon" or lower(http.user_agent) contains "cardyb"))
+  Then: dynamic redirect to concat("/_embed", http.request.uri.path)
+  ```
+
+  Deploy `cards` first, then `router`.
