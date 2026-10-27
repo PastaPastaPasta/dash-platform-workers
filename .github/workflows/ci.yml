@@ -21,7 +21,12 @@ jobs:
       - name: Toolchain
         run: |
           rustup show active-toolchain || rustup toolchain install
-          sudo apt-get update && sudo apt-get install -y clang llvm protobuf-compiler
+          sudo apt-get update && sudo apt-get install -y clang llvm
+      - name: protoc 29.3 (tenderdash-proto needs 25 or newer)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/protoc.zip" https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-linux-x86_64.zip
+          unzip -q "$RUNNER_TEMP/protoc.zip" -d "$RUNNER_TEMP/protoc"
+          echo "$RUNNER_TEMP/protoc/bin" >> "$GITHUB_PATH"
       - uses: taiki-e/install-action@v2
         with:
           tool: wasm-bindgen@0.2.108
