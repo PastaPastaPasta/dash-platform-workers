@@ -6,8 +6,10 @@ workers_dev = false
 
 [vars]
 NETWORK = "testnet"
-# The social contracts of the Yappr deployments routed here: yap.pr, then yappr.thepasta.org.
-SOCIAL_CONTRACTS = "9oDC6xdg8WRixTD2j3FCBq3vtsrf6bRGjXSJbhtFoma9,EWR695MsqPUuW8EnTbYzD4KybNQD5n7CUDWydJYNg63F"
+# Social contracts of the Yappr builds routed here, comma-separated. Yappr's master build
+# (yap.pr and its yappr.thepasta.org mirror) uses one; /staging, /beta and the other sub-path
+# deployments use others and aren't routed.
+SOCIAL_CONTRACTS = "EWR695MsqPUuW8EnTbYzD4KybNQD5n7CUDWydJYNg63F"
 PROFILE_CONTRACT = "FZSnZdKsLAuWxE7iZJq12eEz6xfGTgKPxK7uZJapTQxe"
 
 [observability]

@@ -9,8 +9,8 @@ compatibility_date = "2026-10-01"
 [vars]
 ORIGIN = "https://yap.pr"
 CANONICAL_ORIGIN = "https://yap.pr"
-# The site's social contract (lib/constants.ts YAPPR_CONTRACT_ID in its build).
-SOCIAL_CONTRACT = "9oDC6xdg8WRixTD2j3FCBq3vtsrf6bRGjXSJbhtFoma9"
+# The social contract of the site's build (YAPPR_CONTRACT_ID in Yappr's lib/constants.ts on master).
+SOCIAL_CONTRACT = "EWR695MsqPUuW8EnTbYzD4KybNQD5n7CUDWydJYNg63F"
 
 [[services]]
 binding = "CARDS"
@@ -27,7 +27,7 @@ routes = [
   { pattern = "yappr.thepasta.org/post*", zone_name = "thepasta.org" },
   { pattern = "yappr.thepasta.org/user*", zone_name = "thepasta.org" },
 ]
-# This mirror's build uses its own social contract, not yap.pr's.
+# Environments don't inherit vars; the mirror serves the same master build as yap.pr.
 vars = { SOCIAL_CONTRACT = "EWR695MsqPUuW8EnTbYzD4KybNQD5n7CUDWydJYNg63F" }
 
 [[env.thepasta.services]]

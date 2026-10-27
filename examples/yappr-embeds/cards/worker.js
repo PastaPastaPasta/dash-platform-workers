@@ -2,7 +2,7 @@
 // Platform with proofs. Reached only through the router's service binding, never publicly.
 //
 // GET /?kind=post|user&id=<base58>&contract=<social contract> → JSON card, or null when there is
-// none to show. Each Yappr deployment has its own social contract; only SOCIAL_CONTRACTS are read.
+// none to show. Yappr's builds use different social contracts; only SOCIAL_CONTRACTS are read.
 import { DashPlatform } from '../../../src/index.js';
 
 const IDENTIFIER = /^[1-9A-HJ-NP-Za-km-z]{42,44}$/;
