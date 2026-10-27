@@ -91,4 +91,11 @@ PLATFORM_DIR=~/src/platform scripts/build.sh      # against a local dashpay/plat
 npm test
 ```
 
-Try it locally with `npx wrangler dev` in [`examples/basic`](examples/basic).
+## Examples
+
+- [`examples/basic`](examples/basic): a JSON API over Platform, with a token-gated `/rpc` route
+  for any method. Try it locally with `npx wrangler dev`.
+- [`examples/yappr-embeds`](examples/yappr-embeds): rich link previews for
+  [Yappr](https://yap.pr). Yappr is a static app, so Discord, Slack and X see a generic page for
+  every post. Routed in front of the site, this answers their crawlers with the post's author,
+  text and avatar read from Platform, and passes everyone else through untouched.
