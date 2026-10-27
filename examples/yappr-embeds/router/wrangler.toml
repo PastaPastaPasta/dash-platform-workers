@@ -16,3 +16,19 @@ service = "yappr-cards"
 
 [observability]
 enabled = true
+
+# yappr.thepasta.org: the Cloudflare Pages mirror of yap.pr, on a zone in this account.
+# `wrangler deploy --env thepasta`
+[env.thepasta]
+workers_dev = false
+routes = [
+  { pattern = "yappr.thepasta.org/post*", zone_name = "thepasta.org" },
+  { pattern = "yappr.thepasta.org/user*", zone_name = "thepasta.org" },
+]
+
+[[env.thepasta.services]]
+binding = "CARDS"
+service = "yappr-cards"
+
+[env.thepasta.observability]
+enabled = true
