@@ -29,6 +29,7 @@ use dash_sdk::query_types::{
 use dash_sdk::Sdk;
 use serde_json::{json, Value as Json};
 
+use crate::client;
 use crate::params::{id_string, Params};
 use crate::{js, JsResult};
 
@@ -45,7 +46,7 @@ pub(crate) async fn fetch_contract(sdk: &Sdk, p: &Params) -> JsResult<Arc<DataCo
     DataContract::fetch(sdk, id)
         .await
         .map_err(js)?
-        .map(Arc::new)
+        .map(client::remember_contract)
         .ok_or_else(|| js(format!("contract not found: {}", id_string(&id))))
 }
 
