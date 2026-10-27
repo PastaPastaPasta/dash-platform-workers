@@ -1,9 +1,9 @@
 // Dash Platform for Cloudflare Workers. Names follow evo-sdk; every read is proof-verified.
 import * as wasm from '../dist/wasm/dash_platform.js';
 import wasmModule from '../dist/wasm/dash_platform_bg.wasm';
-import { installIpFetch } from './ip-fetch.js';
+// Routes the SDK's requests to evonode IPs over TLS sockets; see ip-fetch.js.
+import './ip-fetch.js';
 
-installIpFetch();
 // Instantiating at module scope bills compilation to Worker startup, not to the first request.
 wasm.initSync({ module: wasmModule });
 
